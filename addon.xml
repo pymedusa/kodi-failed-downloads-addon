@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addon id="context.medusa.failed.menu" name="Medusa failed download search" version="0.0.1" provider-name="p0psicles">
+    <requires>
+        <import addon="xbmc.python" version="2.25.0"/>
+        <import addon="script.module.pydevd" version="4.4.0"/>
+        <import addon="script.module.requests" version="2.18.4"/>
+    </requires>
+    <extension point="kodi.context.item" library="main.py">
+    <item>
+        <!-- This label can be changed in your strings.po -->
+        <label>32000</label>
+        <visible>StringCompare(ListItem.dbtype, episode)</visible>
+    </item>
+    </extension>
+    <extension point="xbmc.addon.metadata">
+        <summary lang="en_GB">Mark episode as &#34;failed&#34; and attempt to trigger a new search</summary>
+        <description lang="en_GB"></description>
+        <language></language>
+        <platform>all</platform>
+        <license>MIT</license>
+        <forum></forum>
+        <website></website>
+        <email>p0psicles@gmail.com</email>
+        <source></source>
+        <news></news>
+        <disclaimer></disclaimer>
+        <assets>
+            <icon>resources/icon.png</icon>
+            <fanart>resources/fanart.jpg</fanart>
+        </assets>
+    </extension>
+</addon>
