@@ -5,7 +5,7 @@ import xbmcaddon
 import xbmcgui
 import requests
 from requests.compat import urljoin
-from requests.exceptions import HTTPError
+from requests.exceptions import HTTPError, RequestException
 import json
 import os, sys
 import jwt
@@ -90,8 +90,9 @@ class MedusaApi(object):
         try:
             response = self.api_v2_request('api/v2/series')
             response.raise_for_status()
-        except HTTPError:
+        except HTTPError as error:
             dialog_notification('Failed retrieving series', xbmcgui.NOTIFICATION_WARNING)
+            xbmc.log('Failed retrieving series, error: {0}'.format(error), xbmc.LOGERROR)
         except RequestException as error:
             dialog_notification(
                 'Something went wrong trying to connect to {url}. Error: {error}'.format(
@@ -99,6 +100,9 @@ class MedusaApi(object):
                 ),
                 xbmcgui.NOTIFICATION_WARNING
             )
+            xbmc.log('Something went wrong trying to connect to {url}. Error: {error}'.format(
+                url=self.url, error=error
+            ), xbmc.LOGERROR)
         else:
             series = response.json()
             if not len(response.json()):
@@ -109,7 +113,7 @@ class MedusaApi(object):
                 for show in series:
                     show_id = show['id']
                     show_tvdb = show_id.get('tvdb')
-                    if str(show_tvdb) == tvdb_id:
+                    if int(show_tvdb) == int(tvdb_id):
                         return show
             else:
                 return series
