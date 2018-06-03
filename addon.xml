@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="context.medusa.failed" name="Medusa failed download search" version="0.0.1" provider-name="p0psicles">
+<addon id="context.medusa.failed" name="Medusa failed download search" version="0.0.2" provider-name="p0psicles">
     <requires>
         <import addon="xbmc.python" version="2.25.0"/>
         <import addon="script.module.requests" version="2.18.4"/>
