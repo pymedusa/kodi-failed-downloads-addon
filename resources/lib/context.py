@@ -4,7 +4,6 @@ import xbmc
 import xbmcaddon
 import xbmcgui
 import requests
-from requests.auth import HTTPBasicAuth
 from requests.compat import urljoin
 from requests.exceptions import HTTPError
 import json
@@ -15,6 +14,8 @@ import jwt
 addon = xbmcaddon.Addon()
 addon_name = addon.getAddonInfo('name')
 dialog = xbmcgui.Dialog()
+
+TIMEOUT = 60
 
 
 def dialog_notification(message, heading='Medusa failed downloads', icon=xbmcgui.NOTIFICATION_INFO):
@@ -45,13 +46,15 @@ class MedusaApi(object):
         """
         response = None
         try:
-            headers = {'Content-Type': 'application/json'}
+            headers = {
+                'Content-Type': 'application/json'
+            }
             url = urljoin(self.url, 'api/v2/authenticate')
             data = {
                 "username": self.username,
                 "password": self.password
             }
-            response = MedusaApi.MEDUSA_SESSION.post(url, json=data, headers=headers)
+            response = MedusaApi.MEDUSA_SESSION.post(url, json=data, headers=headers, verify=False, timeout=TIMEOUT)
             response.raise_for_status()
         except HTTPError as error:
             xbmc.log(
@@ -67,13 +70,15 @@ class MedusaApi(object):
 
         try:
             jwt_encoded = response.json() if response else response
-        except ValueError:
+        except (AttributeError, ValueError):
             return None
 
         # Decode the jwt into the api-key
         if jwt_encoded.get('token'):
-            decoded = jwt.decode(jwt_encoded['token'], '', algorithms=['HS256'], verify=False)
-            MedusaApi.MEDUSA_API_V2_SESSION.headers.update({'X-Api-Key': decoded['apiKey']})
+            decoded = jwt.decode(jwt_encoded['token'], '', algorithms=['HS256'], verify=False, timeout=TIMEOUT)
+            MedusaApi.MEDUSA_API_V2_SESSION.headers.update({
+                'X-Api-Key': decoded['apiKey']
+            })
             self.api_key = decoded['apiKey']
 
     def get_series(self, tvdb_id=''):
@@ -83,10 +88,17 @@ class MedusaApi(object):
         Because we can't currently search series using an IMDB id, we're retrieving all series, and mathing them one by one.
         """
         try:
-            response = self.api_v2_request('api/v2/series?detailed=false')
+            response = self.api_v2_request('api/v2/series')
             response.raise_for_status()
-        except HTTPError as error:
+        except HTTPError:
             dialog_notification('Failed retrieving series', xbmcgui.NOTIFICATION_WARNING)
+        except RequestException as error:
+            dialog_notification(
+                'Something went wrong trying to connect to {url}. Error: {error}'.format(
+                    url=self.url, error=error
+                ),
+                xbmcgui.NOTIFICATION_WARNING
+            )
         else:
             series = response.json()
             if not len(response.json()):
@@ -112,7 +124,10 @@ class MedusaApi(object):
             dialog_notification('Your not authenticated to medusas api v2!', xbmcgui.NOTIFICATION_WARNING)
 
         url_with_api_key = urljoin(self.url, 'api/v1/{key}/'.format(key=self.api_key))
-        return MedusaApi.MEDUSA_API_V1_SESSION.get(url_with_api_key, params=params, headers={'X-Requested-With': 'XMLHttpRequest'})
+        headers = {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+        return MedusaApi.MEDUSA_API_V1_SESSION.get(url_with_api_key, params=params, headers=headers, verify=False, timeout=TIMEOUT)
 
     def api_v2_request(self, url):
         """Request a resource using medusa's api v2."""
@@ -120,12 +135,12 @@ class MedusaApi(object):
             dialog_notification('Your not authenticated to medusas api v2!', xbmcgui.NOTIFICATION_WARNING)
 
         full_url = urljoin(self.url, url)
-        return MedusaApi.MEDUSA_API_V2_SESSION.get(full_url)
+        return MedusaApi.MEDUSA_API_V2_SESSION.get(full_url, verify=False, timeout=TIMEOUT)
 
     def web_request(self, url, params):
         """Request a resource using medusa's web_request."""
         full_url = urljoin(self.url, url)
-        return MedusaApi.MEDUSA_SESSION.get(full_url, params=params, auth=HTTPBasicAuth(self.username, self.password))
+        return MedusaApi.MEDUSA_SESSION.get(full_url, params=params, verify=False, timeout=TIMEOUT)
 
 
 class MedusaFailed(object):
@@ -171,15 +186,6 @@ class MedusaFailed(object):
         # You might want to check your addon.xml for the visible condition of your contextmenu
         # Read more here http://kodi.wiki/view/Context_Item_Add-ons
 
-        line1 = "Hello {0}".format(self.settings.username)
-
-        print('dbId: {0}'.format(sys.listitem.getVideoInfoTag().getDbId()))
-        print('getPath: {0}'.format(sys.listitem.getVideoInfoTag().getPath()))
-        print('Episode: {0}'.format(sys.listitem.getVideoInfoTag().getEpisode()))
-        print('Season: {0}'.format(sys.listitem.getVideoInfoTag().getSeason()))
-        print('Title: {0}'.format(sys.listitem.getVideoInfoTag().getTitle()))
-        print('id: {0}'.format(xbmc.getInfoLabel("ListItem.Property(id)")))
-
         list_item_show_title = sys.listitem.getVideoInfoTag().getTVShowTitle()
         list_item_season = sys.listitem.getVideoInfoTag().getSeason()
         list_item_episode = sys.listitem.getVideoInfoTag().getEpisode()
@@ -188,7 +194,10 @@ class MedusaFailed(object):
         series = self.match_series(sys.listitem.getVideoInfoTag().getDbId())
 
         if not series:
-            dialog_notification("Could not locate series {0}".format(list_item_show_title), xbmcgui.NOTIFICATION_WARNING)
+            dialog_notification("Medusa could not locate series {0}".format(
+                list_item_show_title), xbmcgui.NOTIFICATION_WARNING
+            )
+            return
 
         # Start a new forced search
         dialog_notification('Started search for for S{season}E{episode} of show {show}'.format(
@@ -204,6 +213,13 @@ class MedusaFailed(object):
         except HTTPError as error:
             dialog_notification(
                 'Error while trying to start a search. Error: {error}'.format(error=error),
+                xbmcgui.NOTIFICATION_WARNING
+            )
+        except RequestException as error:
+            dialog_notification(
+                'Something went wrong trying to connect to {url}. Error: {error}'.format(
+                    url=self.medusa.url, error=error
+                ),
                 xbmcgui.NOTIFICATION_WARNING
             )
         else:
