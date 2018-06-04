@@ -88,10 +88,12 @@ class MedusaApi(object):
         Because we can't currently search series using an IMDB id, we're retrieving all series, and mathing them one by one.
         """
         try:
-            response = self.api_v2_request('api/v2/series')
+            response = self.api_v2_request('api/v2/series/tvdb{tvdb_id}'.format(tvdb_id=tvdb_id))
             response.raise_for_status()
         except HTTPError as error:
-            dialog_notification('Failed retrieving series', xbmcgui.NOTIFICATION_WARNING)
+            dialog_notification(
+                'Failed retrieving series with tvdb id {tvdb_id}'.format(tvdb_id=tvdb_id), xbmcgui.NOTIFICATION_WARNING
+            )
             xbmc.log('Failed retrieving series, error: {0}'.format(error), xbmc.LOGERROR)
         except RequestException as error:
             dialog_notification(
@@ -104,19 +106,7 @@ class MedusaApi(object):
                 url=self.url, error=error
             ), xbmc.LOGERROR)
         else:
-            series = response.json()
-            if not len(response.json()):
-                dialog_notification("Your medusa library doesn't have any shows.", xbmcgui.NOTIFICATION_WARNING)
-                return
-            if tvdb_id:
-
-                for show in series:
-                    show_id = show['id']
-                    show_tvdb = show_id.get('tvdb')
-                    if int(show_tvdb) == int(tvdb_id):
-                        return show
-            else:
-                return series
+            return response.json()
 
     def api_v1_request(self, params):
         """
@@ -133,13 +123,13 @@ class MedusaApi(object):
         }
         return MedusaApi.MEDUSA_API_V1_SESSION.get(url_with_api_key, params=params, headers=headers, verify=False, timeout=TIMEOUT)
 
-    def api_v2_request(self, url):
+    def api_v2_request(self, url, params=None):
         """Request a resource using medusa's api v2."""
         if not MedusaApi.MEDUSA_API_V2_SESSION.headers.get('X-Api-Key'):
             dialog_notification('Your not authenticated to medusas api v2!', xbmcgui.NOTIFICATION_WARNING)
 
         full_url = urljoin(self.url, url)
-        return MedusaApi.MEDUSA_API_V2_SESSION.get(full_url, verify=False, timeout=TIMEOUT)
+        return MedusaApi.MEDUSA_API_V2_SESSION.get(full_url, params=params, verify=False, timeout=TIMEOUT)
 
     def web_request(self, url, params):
         """Request a resource using medusa's web_request."""
@@ -179,39 +169,21 @@ class MedusaFailed(object):
 
         if json_response.get('result'):
             tvdb_id = json_response['result']['tvshowdetails']['imdbnumber']
+            xbmc.log("Found a show for provided episode id, with tvdb id: {0}".format(tvdb_id), xbmc.LOGDEBUG)
 
         if tvdb_id:
             return self.medusa.get_series(tvdb_id)
 
-    def run(self):
-        # Implement what your contextmenu aims to do here
-        # For example you could call executebuiltin to call another addon
-        #   xbmc.executebuiltin("RunScript(script.example,action=show)")
-        # You might want to check your addon.xml for the visible condition of your contextmenu
-        # Read more here http://kodi.wiki/view/Context_Item_Add-ons
-
-        list_item_show_title = sys.listitem.getVideoInfoTag().getTVShowTitle()
-        list_item_season = sys.listitem.getVideoInfoTag().getSeason()
-        list_item_episode = sys.listitem.getVideoInfoTag().getEpisode()
-
-        # Let's match kodi's episode dbId -> kodi's series dbId -> medusa's tvdb id.
-        series = self.match_series(sys.listitem.getVideoInfoTag().getDbId())
-
-        if not series:
-            dialog_notification("Medusa could not locate series {0}".format(
-                list_item_show_title), xbmcgui.NOTIFICATION_WARNING
-            )
-            return
-
+    def start_search(self, show, season, episode):
         # Start a new forced search
         dialog_notification('Started search for for S{season}E{episode} of show {show}'.format(
-                season=list_item_season, episode=list_item_episode, show=list_item_show_title
+            season=season, episode=episode, show=show.get('title')
         ), xbmcgui.NOTIFICATION_INFO)
 
         try:
             response = self.medusa.api_v1_request(params={
-                'cmd': 'episode.search', 'indexerid': series['id']['tvdb'],
-                'season': list_item_season, 'episode': list_item_episode, 'tvdbid': series['id']['tvdb']
+                'cmd': 'episode.search', 'indexerid': show['id']['tvdb'],
+                'season': season, 'episode': episode, 'tvdbid': show['id']['tvdb']
             })
             response.raise_for_status()
         except HTTPError as error:
@@ -230,10 +202,29 @@ class MedusaFailed(object):
             json_response = response.json()
             if json_response.get('result') not in ('failure',):
                 dialog_ok('Successful started search for S{season}E{episode} of show {show}'.format(
-                    season=list_item_season, episode=list_item_episode, show=list_item_show_title
+                    season=season, episode=episode, show=show.get('title')
                 ))
             else:
                 dialog_notification(
                     'Error while searching for episode. Error: {error}'.format(error=json_response.get('message')),
                     xbmcgui.NOTIFICATION_WARNING
                 )
+
+    def run(self):
+        """Run main of plugin."""
+        list_item_show_title = sys.listitem.getVideoInfoTag().getTVShowTitle()
+        list_item_season = sys.listitem.getVideoInfoTag().getSeason()
+        list_item_episode = sys.listitem.getVideoInfoTag().getEpisode()
+
+        # Let's match kodi's episode dbId -> kodi's series dbId -> medusa's tvdb id.
+        show = self.match_series(sys.listitem.getVideoInfoTag().getDbId())
+
+        if not show:
+            dialog_notification("Medusa could not locate series {0}".format(
+                list_item_show_title), xbmcgui.NOTIFICATION_WARNING
+            )
+            xbmc.log("Medusa could not locate series {0}".format(list_item_show_title), xbmc.LOGWARNING)
+            return
+
+        # Give medusa the instruction to start a new forced search.
+        self.start_search(show, list_item_season, list_item_episode)
