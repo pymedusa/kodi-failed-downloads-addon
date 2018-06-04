@@ -121,7 +121,11 @@ class MedusaApi(object):
         headers = {
             'X-Requested-With': 'XMLHttpRequest'
         }
-        return MedusaApi.MEDUSA_API_V1_SESSION.get(url_with_api_key, params=params, headers=headers, verify=False, timeout=TIMEOUT)
+        # Increased timeout as the forced search call is synchronous. So on large providers lists we need to wait a
+        # certain time, to get back results.
+        return MedusaApi.MEDUSA_API_V1_SESSION.get(
+            url_with_api_key, params=params, headers=headers, verify=False, timeout=600
+        )
 
     def api_v2_request(self, url, params=None):
         """Request a resource using medusa's api v2."""
@@ -181,10 +185,10 @@ class MedusaFailed(object):
         ), xbmcgui.NOTIFICATION_INFO)
 
         try:
-            response = self.medusa.api_v1_request(params={
-                'cmd': 'episode.search', 'indexerid': show['id']['tvdb'],
-                'season': season, 'episode': episode, 'tvdbid': show['id']['tvdb']
-            })
+            response = self.medusa.api_v1_request(
+                params={'cmd': 'episode.search', 'indexerid': show['id']['tvdb'],
+                        'season': season, 'episode': episode, 'tvdbid': show['id']['tvdb']}
+            )
             response.raise_for_status()
         except HTTPError as error:
             dialog_notification(
@@ -221,8 +225,8 @@ class MedusaFailed(object):
 
         if not show:
             dialog_notification("Medusa could not locate series {0}".format(
-                list_item_show_title), xbmcgui.NOTIFICATION_WARNING
-            )
+                list_item_show_title
+            ), xbmcgui.NOTIFICATION_WARNING)
             xbmc.log("Medusa could not locate series {0}".format(list_item_show_title), xbmc.LOGWARNING)
             return
 
