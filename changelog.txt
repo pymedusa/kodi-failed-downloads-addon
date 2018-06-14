@@ -1,3 +1,6 @@
+v0.0.3
+- Use retryEpisode to use the failed download process instead of the default force search.
+
 v0.0.2
 - Fix installation
 
