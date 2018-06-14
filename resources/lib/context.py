@@ -6,6 +6,7 @@ import xbmcgui
 import requests
 from requests.compat import urljoin
 from requests.exceptions import HTTPError, RequestException
+from requests.auth import HTTPBasicAuth
 import json
 import os, sys
 import jwt
@@ -83,9 +84,7 @@ class MedusaApi(object):
 
     def get_series(self, tvdb_id=''):
         """
-        Get all Medusa series.
-
-        Because we can't currently search series using an IMDB id, we're retrieving all series, and mathing them one by one.
+        Use the apiv2 to get the series data with the tvdb_id provided.
         """
         try:
             response = self.api_v2_request('api/v2/series/tvdb{tvdb_id}'.format(tvdb_id=tvdb_id))
@@ -137,8 +136,30 @@ class MedusaApi(object):
 
     def web_request(self, url, params):
         """Request a resource using medusa's web_request."""
+
+        # First login.
+        login_data = {
+            'username': self.username,
+            'password': self.password,
+            'remember_me': 1,
+            'submit': 'Login'
+        }
+        MedusaApi.MEDUSA_SESSION.post(
+            urljoin(self.url, 'login'), data=login_data, headers={'Content-Type': 'application/x-www-form-urlencoded'},
+            verify=False, auth=(self.username, self.password), timeout=TIMEOUT
+        )
+
         full_url = urljoin(self.url, url)
-        return MedusaApi.MEDUSA_SESSION.get(full_url, params=params, verify=False, timeout=TIMEOUT)
+        xbmc.log('base url: {base}, added: {added}, full: {full}'.format(
+            base=self.url, added=url, full=full_url
+        ), xbmc.LOGINFO)
+
+        headers = {
+            'Content-Type': 'application/json'
+        }
+        return MedusaApi.MEDUSA_SESSION.get(
+            full_url, params=params, headers=headers, verify=False, auth=(self.username, self.password), timeout=TIMEOUT
+        )
 
 
 class MedusaFailed(object):
@@ -178,6 +199,29 @@ class MedusaFailed(object):
         if tvdb_id:
             return self.medusa.get_series(tvdb_id)
 
+    def search_episode(self, show, season, episode):
+        """Search for episode using a normal forced search."""
+        url = 'home/searchEpisode'
+        params = {
+            'indexername': 'tvdb',
+            'seriesid': show['id']['tvdb'],
+            'season': season,
+            'episode': episode
+        }
+        return self.medusa.web_request(url=url, params=params)
+
+    def retry_episode(self, show, season, episode):
+        """Search for episode using the failed search process."""
+        url = 'home/retryEpisode'
+        params = {
+            'indexername': 'tvdb',
+            'seriesid': show['id']['tvdb'],
+            'season': season,
+            'episode': episode,
+            'down_cur_quality': 1
+        }
+        return self.medusa.web_request(url=url, params=params)
+
     def start_search(self, show, season, episode):
         # Start a new forced search
         dialog_notification('Started search for for S{season}E{episode} of show {show}'.format(
@@ -185,16 +229,14 @@ class MedusaFailed(object):
         ), xbmcgui.NOTIFICATION_INFO)
 
         try:
-            response = self.medusa.api_v1_request(
-                params={'cmd': 'episode.search', 'indexerid': show['id']['tvdb'],
-                        'season': season, 'episode': episode, 'tvdbid': show['id']['tvdb']}
-            )
+            response = self.retry_episode(show, season, episode)
             response.raise_for_status()
         except HTTPError as error:
             dialog_notification(
                 'Error while trying to start a search. Error: {error}'.format(error=error),
                 xbmcgui.NOTIFICATION_WARNING
             )
+            xbmc.log('Error while trying to start a search. Error: {error}'.format(error=error), xbmc.LOGERROR)
         except RequestException as error:
             dialog_notification(
                 'Something went wrong trying to connect to {url}. Error: {error}'.format(
@@ -202,7 +244,16 @@ class MedusaFailed(object):
                 ),
                 xbmcgui.NOTIFICATION_WARNING
             )
+            xbmc.log('Something went wrong trying to connect to {url}. Error: {error}'.format(
+                    url=self.medusa.url, error=error
+            ), xbmc.LOGERROR)
         else:
+            xbmc.log(
+                'Search url: {url}\nrequest: {request!r}\nresponse: {response!r}'.format(url=response.request.url,
+                                                                                         request=response.request.headers,
+                                                                                         response=response.content),
+                xbmc.LOGDEBUG
+            )
             json_response = response.json()
             if json_response.get('result') not in ('failure',):
                 dialog_ok('Successful started search for S{season}E{episode} of show {show}'.format(
@@ -210,6 +261,10 @@ class MedusaFailed(object):
                 ))
             else:
                 dialog_notification(
+                    'Error while searching for episode. Error: {error}'.format(error=json_response.get('message')),
+                    xbmcgui.NOTIFICATION_WARNING
+                )
+                xbmc.log(
                     'Error while searching for episode. Error: {error}'.format(error=json_response.get('message')),
                     xbmcgui.NOTIFICATION_WARNING
                 )
