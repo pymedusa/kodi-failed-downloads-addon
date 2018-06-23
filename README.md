@@ -19,3 +19,7 @@ The addon should now be installed in the sub-menu `Context menus`. Configure the
 * Password
 * Debug should only be used by developers who want to make use of remote debugging. Enabling Kodi debugging will also provide you with additional debugging logs, when troubleshooting the addon.
 
+## FAQ
+
+Q: When trying to fail a download, i'm getting an error that it can't find the tvdb id.
+A: You'll probably haven't properly indexed the show in Kodi. Make sure that you've set TVDB as the "Set content" option on the series folder. If it has the wrong id set, try to re-index the show.
